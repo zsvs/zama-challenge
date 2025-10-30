@@ -1,0 +1,6 @@
+region               = "eu-west-1"
+name_prefix          = "zama-challenge"
+desired_count        = 2
+image_tag            = "v0.1.0"
+api_key_ssm_name     = "/zama/api/api_key"
+
