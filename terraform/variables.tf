@@ -19,7 +19,6 @@ variable "desired_count" {
 variable "image_tag" {
   type        = string
   description = "Docker image tag used for both images"
-  default     = "v0.1.0"
 }
 
 variable "api_key_ssm_name" {

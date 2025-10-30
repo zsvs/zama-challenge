@@ -1,0 +1,108 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+env:
+  AWS_REGION: eu-west-1
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.3"
+
+      - name: Unit tests
+        run: |
+          cd services/api && go test ./...
+
+  docker-build-push:
+    runs-on: ubuntu-latest
+    needs: build-test
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      # Configure AWS creds via OIDC
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get AWS account
+        id: acct
+        run: echo "id=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_OUTPUT
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build images
+        run: |
+          TAG=${GITHUB_SHA::7}
+          API_REPO=${{ steps.acct.outputs.id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/zama-api
+          NGINX_REPO=${{ steps.acct.outputs.id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/zama-nginx
+          docker build -t $API_REPO:$TAG -f services/api/Dockerfile services/api
+          docker build -t $NGINX_REPO:$TAG -f services/nginx/Dockerfile services/nginx
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "API_REPO=$API_REPO" >> $GITHUB_ENV
+          echo "NGINX_REPO=$NGINX_REPO" >> $GITHUB_ENV
+
+      - name: Push images
+        run: |
+          docker push $API_REPO:$TAG
+          docker push $NGINX_REPO:$TAG
+
+  Terraform:
+    runs-on: ubuntu-latest
+    needs: docker-build-push
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.4
+      - name: Terraform init/validate/plan
+        run: |
+          cd terraform
+          terraform init -input=false
+          terraform validate
+          cat > terraform.tfvars <<EOF
+            region               = "${{ env.AWS_REGION }}"
+            name_prefix          = "zama-challenge"
+            desired_count        = 2
+            image_tag            = "${{ env.TAG }}"
+            api_key_ssm_name     = "/zama/api/api_key"
+            api_key_value        = "${{ secrets.API_KEY_VALUE }}"
+            EOF
+            terraform plan -input=false -out zama-plan
+            terraform show -no-color zama-plan > ../plan.txt
+
+      - name: Upload plan.txt
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan.txt
+          path: plan.txt

@@ -4,3 +4,4 @@ desired_count        = 2
 image_tag            = "v0.1.0"
 api_key_ssm_name     = "/zama/api/api_key"
 
+api_key_value = CHANGE_ME

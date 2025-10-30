@@ -29,6 +29,27 @@ resource "aws_iam_role_policy_attachment" "task_exec_attach" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+# Custom policy for task execution role to read SSM parameters
+data "aws_iam_policy_document" "task_exec_ssm" {
+  statement {
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters"
+    ]
+    resources = [aws_ssm_parameter.api_key.arn]
+  }
+}
+
+resource "aws_iam_policy" "task_exec_ssm" {
+  name   = "${var.name_prefix}-task-exec-ssm"
+  policy = data.aws_iam_policy_document.task_exec_ssm.json
+}
+
+resource "aws_iam_role_policy_attachment" "task_exec_ssm_attach" {
+  role       = aws_iam_role.task_execution.name
+  policy_arn = aws_iam_policy.task_exec_ssm.arn
+}
+
 # Task role for reading SSM parameter
 resource "aws_iam_role" "task_role" {
   name               = "${var.name_prefix}-task-role"
@@ -86,7 +107,6 @@ resource "aws_security_group" "ecs" {
 resource "aws_vpc_security_group_ingress_rule" "ecs_allow_alb" {
   security_group_id = aws_security_group.ecs.id
 
-  cidr_ipv4                    = "0.0.0.0/0"
   from_port                    = 80
   ip_protocol                  = "tcp"
   to_port                      = 80
@@ -158,7 +178,7 @@ resource "aws_ecs_task_definition" "this" {
       "essential" : true,
       "portMappings" : [{ "containerPort" : 8080, "hostPort" : 8080, "protocol" : "tcp" }],
       "environment" : [
-        { "name" : "REQUIRE_API_KEY", "value" : "false" } # enforced in nginx anyway
+        { "name" : "REQUIRE_API_KEY", "value" : "false" }
       ],
       "logConfiguration" : {
         "logDriver" : "awslogs",
@@ -174,6 +194,10 @@ resource "aws_ecs_task_definition" "this" {
       "image" : local.nginx_image,
       "essential" : true,
       "portMappings" : [{ "containerPort" : 80, "hostPort" : 80, "protocol" : "tcp" }],
+      "environment" : [
+        { "name" : "API_HOST", "value" : "localhost" },
+        { "name" : "API_PORT", "value" : "8080" }
+      ],
       "secrets" : [
         { "name" : "API_KEY", "valueFrom" : aws_ssm_parameter.api_key.arn }
       ],

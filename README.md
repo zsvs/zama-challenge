@@ -9,7 +9,7 @@ A tiny developer-facing API operated with pragmatic SRE practices:
 - **Provisioning/Deployment**: Terraform on **AWS** (uses the default VPC + subnets to stay minimal). Includes **CloudWatch Logs**, **dashboard**, and **alarm**.
 - **Observability**: Structured JSON logs from Nginx and app to CloudWatch; a small dashboard + one alert (ALB 5xx spikes).
 
-> You **don't** need a live env for submission. Include a saved `plan.txt` and an image of the Terraform graph (see below).
+Image of the Terraform graph (see below).
 
 ![Terraform Graph](terraform-graph.png)
 
@@ -90,14 +90,15 @@ curl -s -H 'X-Api-Key: CHANGEME' -H 'Content-Type: application/json'   -d '{"a":
 
 ## AWS Deploy (Terraform)
 
-> Minimal footprint: uses **default VPC and subnets**. If your account doesn’t have a default VPC, adapt `terraform/networking.tf` to create one.
+> Minimal footprint: using **default VPC and subnets**.
 
 ### 0) Prereqs
 - AWS credentials configured (e.g., `aws configure`).
-- Terraform >= 1.5, Docker, and `jq` installed.
+- Terraform ~> 1.13.0, Docker, and `jq` installed.
 
 ### 1) ECR repos and image push
-Terraform creates two ECR repos. Build & push images (replace region/account, and set an image tag, e.g. git SHA):
+Terraform creates two ECR repos. Build & push images:
+
 ```bash
 # Get AWS Account ID (bash example)
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -140,6 +141,10 @@ ALB_DNS_NAME = my-alb-123456.eu-west-1.elb.amazonaws.com
 ```
 
 Call endpoints (replace `API_KEY` with your value):
+
+> [!NOTE]
+> Actual API_KEY setting up by Github Workflow and was fetched from the repository secrets
+
 ```bash
 curl -s http://ALB_DNS_NAME/healthz
 curl -s http://ALB_DNS_NAME/readyz
@@ -241,7 +246,12 @@ This approach provides a safety gate, allowing review of infrastructure changes 
 - Swap to **Amazon Managed Prometheus** + **Managed Grafana** with richer dashboards + SLOs.
 - Use **AWS WAF** in front of ALB (rate-based rules, IP allowlists/deny).
 - Rollout strategy: blue/green with CodeDeploy + weighted target groups.
-- CI/CD: full GitHub Actions pipeline with Atlantis(interactive working via PR comments), auto-plan, auto-merge.
+- Secrets management:
+  - If we continue to use SSM Parameter Store, I will add KMS encryption of secret before saving in SSM.
+  - Use Secrets Manager instead(which allows us to leverage secrets rotation and so on).
+- CI/CD:
+    - Full GitHub Actions pipeline with Atlantis(interactive working via PR comments), auto-plan, auto-merge.
+    - Create workflows to perform static code analysis.
 - **Policy-as-code & Security Scanning**:
   - **tfsec/Checkov**: Integrate static analysis tools to scan Terraform code for security misconfigurations before deployment. These tools detect issues like unencrypted storage, overly permissive security groups, missing encryption at rest/in transit, and AWS best practice violations. Run as part of CI to fail builds on critical findings.
   - **Container Scanning**: Implement vulnerability scanning for Docker images using tools like Trivy, Grype, or AWS ECR native scanning. Scan images for known CVEs in base images and dependencies during the build process. Set severity thresholds (e.g., fail on HIGH/CRITICAL vulnerabilities) to prevent vulnerable images from reaching production.
